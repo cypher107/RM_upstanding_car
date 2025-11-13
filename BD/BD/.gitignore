@@ -1,0 +1,11 @@
+# Keil工程忽略项
+/**/MDK-ARM/*
+# 不忽略Keil工程配置文件
+!/**/MDK-ARM/*.uvoptx
+!/**/MDK-ARM/*.uvprojx
+!/**/MDK-ARM/startup_*.s
+
+# Vscode编辑器忽略项
+/**/.vscode/*
+# 不忽略Vscode工程配置文件
+!/**/.vscode/c_cpp_properties.json
