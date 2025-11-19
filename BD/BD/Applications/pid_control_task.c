@@ -18,14 +18,14 @@
 #define RC_CH_MAX 660                // 约为 660
 #define MAX_FORWARD_SPEED 5000   // 目标速度最大值（单位：rpm，按需调整）
 #define MAX_YAW_SPEED 3000        // 转向分量最大值（单位：rpm，相对量）
-#define MAX_CHASSIS_CURRENT 8000 // 映射到电流输出的最大值（CAN 电流量程内）
+#define MAX_CHASSIS_CURRENT 7500 // 映射到电流输出的最大值（CAN 电流量程内）
 #define RAD_TO_DEG 57.3f
 /* Safety / mode configuration */
 /* If either RC switch is in MID position we'll treat it as "zero-stand" mode
     (不驱动电机）。可按需修改为只检测某个开关，例如只检测右开关 s[1]。 */
 #define ZERO_STAND_DETECT_USING_EITHER_SWITCH 1
 /* Angle threshold (degrees). If |pitch| > ANGLE_CUTOFF_DEG, disable motor output. */
-#define ANGLE_CUTOFF_DEG 20.0f
+#define ANGLE_CUTOFF_DEG 19.0f
 //自定义数学函数这一块
 int16_t max(int16_t a, int16_t b)
 {
@@ -37,7 +37,7 @@ int16_t min(int16_t a, int16_t b)
 }
 
 int16_t output[2];
-
+fp32 condination_angle[3];
 
 /* ================ 全局状态量 ================ */
 /* -------------------- PID 控制器实现 -------------------- */
@@ -60,9 +60,9 @@ static int16_t velocity_ENCODER_s = 0;
 
 // ?????(??)
 AttitudePID_t attitude_pid = {
-    .kp = 80.0f,
+    .kp = 180.0f,
     .ki = 0.0f,
-    .kd = 2.0f,
+    .kd = 5.0f,
 };
 int16_t velocity_pid_control(int16_t current_speed_L, int16_t current_speed_R, int16_t target_speed, VelocityPID_t *pid, float pitch_angle)
 {
@@ -94,7 +94,7 @@ int16_t velocity_pid_control(int16_t current_speed_L, int16_t current_speed_R, i
     else
     {
 
-        velocity_ENCODER_s *= 0.9f;
+        velocity_ENCODER_s = 0;
     }
 
 
@@ -125,7 +125,6 @@ void velocity_pid_reset(void)
 
 int16_t attitude_pid_control(float current_angle, float target_angle, AttitudePID_t *pid, float gyro_y)
 {
-    // gyro_y ????? current_angle ????(??????? gyro ??? deg/s)
     int16_t temp;
     temp = pid->kp * (target_angle - current_angle) - pid->kd * gyro_y;
     return temp;
@@ -158,6 +157,7 @@ void pid_control_task(void const * argument)
         {
             memcpy(local_angles, angles_ptr, sizeof(local_angles));
             angles_valid = 1;
+					
         }
         taskEXIT_CRITICAL();
 
@@ -176,48 +176,6 @@ void pid_control_task(void const * argument)
         int16_t rc_forward = rc->rc.ch[2]; // -RC_CH_MAX .. RC_CH_MAX
         int16_t rc_turn = rc->rc.ch[3];    // -RC_CH_MAX .. RC_CH_MAX
 
-    /*
-     * Zero-stand mode detection (safe start):
-     * If configured, treat either switch being in MID position as "zero-stand"
-     * mode and do not output any motor currents. This prevents accidental
-     * drive while the robot is in a standing/ready state.
-     */
-#if ZERO_STAND_DETECT_USING_EITHER_SWITCH
-    if (rc->rc.s[0] == RC_SW_MID || rc->rc.s[1] == RC_SW_MID)
-    {
-        /* clear velocity PID internal state to avoid integral windup when exiting zero-stand */
-        velocity_pid_reset();
-        CAN_cmd_chassis(0, 0, 0, 0);
-        osDelay(5);
-        continue;
-    }
-#else
-    /* If you prefer to detect zero-stand using only right switch, replace
-       the condition above with: (rc->rc.s[1] == RC_SW_MID) */
-#endif
-
-        /* Right switch (s[1]) to disable motors when in DOWN position */
-        if (rc->rc.s[1] == RC_SW_DOWN)
-        {
-            CAN_cmd_chassis(0, 0, 0, 0);
-            osDelay(5);
-            continue;
-        }
-
-        /*
-         * Backup/alternative logic (kept here as comment):
-         * The version below was previously applied and makes the switch an explicit
-         * enable — only when the right switch is UP will the control loop run.
-         * That behavior is sometimes safer but was reverted per request.
-         *
-         * if (!switch_is_up(rc->rc.s[1]))
-         * {
-         *     // ensure motors are stopped while not enabled
-         *     CAN_cmd_chassis(0, 0, 0, 0);
-         *     osDelay(5);
-         *     continue;
-         * }
-         */
 
     /* convert INS pitch from rad to deg for PID (code elsewhere expects deg) */
     /* 使用文件顶部定义的 RAD_TO_DEG 宏，避免重复魔法常数 */
@@ -277,9 +235,19 @@ void pid_control_task(void const * argument)
         if (current_R > MAX_CHASSIS_CURRENT) current_R = MAX_CHASSIS_CURRENT;
         if (current_R < -MAX_CHASSIS_CURRENT) current_R = -MAX_CHASSIS_CURRENT;
 
-        /* send motor commands: map to motor1 and motor2; keep others zero */
-        CAN_cmd_chassis(current_L, -current_R, 0, 0);
+        
+                /* Right switch (s[1]) to disable motors when in DOWN position */
+                if (rc->rc.s[1] == RC_SW_DOWN)
+                {
+                    CAN_cmd_chassis(0, 0, 0, 0);
+                    osDelay(5);
+                    continue;
+                }
 
+				/* send motor commands: map to motor1 and motor2; keep others zero */
+				
+        CAN_cmd_chassis(current_L, -current_R, 0, 0);
+//				CAN_cmd_chassis(0, 0, 0, 0);
         osDelay(10); /* control loop period (ms) */
     }
 }
